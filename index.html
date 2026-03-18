@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Etch-A-Sketch</title>
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #2a2a2a;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    #app {
+      width: 100%;
+      max-width: 720px;
+      padding: 16px 16px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Device wrapper ── */
+    #device {
+      position: relative;
+      width: 100%;
+      overflow: hidden;  /* clips knob edges that bleed past the frame boundary */
+      /* Height is driven by the in-flow frame image */
+    }
+
+    /* Frame image sits in normal flow to set the container height.
+       All siblings are absolutely positioned on top of/behind it. */
+    #frame-img {
+      display: block;
+      width: 100%;
+      height: auto;
+      position: relative;  /* keeps it in flow */
+      z-index: 10;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    /* ── CSS custom properties for canvas hole (% of frame image dimensions)
+          Frame native size: 1360 × 1252 px
+          Screen hole:  left=56  top=56  width=1247  height=831
+       ── */
+    :root {
+      --canvas-left:   4.12%;   /* 56   / 1360 */
+      --canvas-top:    4.47%;   /* 56   / 1252 */
+      --canvas-width:  91.69%;  /* 1247 / 1360 */
+      --canvas-height: 66.37%;  /* 831  / 1252 */
+
+      /* Knob hole centres (% of frame dimensions):
+         center-x = 14.04% (left) / 85.81% (right), center-y = 84.58%
+         knob-size = 200/1360 = 14.71% — fits the inner recess at any viewport
+         knob-half-w = 7.355% of device-width
+         knob-half-h = 7.355% × (1360/1252) = 7.99% of device-height */
+      --knob-center-left:  14.04%;
+      --knob-center-right: 85.81%;
+      --knob-center-y:     84.58%;
+      --knob-size:         14.71%;
+      --knob-half-w:       7.355%;
+      --knob-half-h:       7.99%;
+    }
+
+    /* Texture background — visible through transparent canvas */
+    #texture-bg {
+      position: absolute;
+      left:   var(--canvas-left);
+      top:    var(--canvas-top);
+      width:  var(--canvas-width);
+      height: var(--canvas-height);
+      background-image: url('assets/texture.png');
+      background-size: cover;
+      background-position: center;
+      z-index: 1;
+    }
+
+    /* Drawing canvas */
+    #drawing-canvas {
+      position: absolute;
+      left:   var(--canvas-left);
+      top:    var(--canvas-top);
+      width:  var(--canvas-width);
+      height: var(--canvas-height);
+      z-index: 2;
+      cursor: crosshair;
+      display: block;
+    }
+
+    #drawing-canvas:focus {
+      outline: 3px solid #3b9eff;
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    /* Knob images — proportional to frame (14.71% = 200px at native 1360px),
+       centred on their recess socket holes */
+    #knob-left,
+    #knob-right {
+      position: absolute;
+      width:  var(--knob-size);
+      height: auto;            /* preserves 1:1 aspect ratio */
+      top:  calc(var(--knob-center-y) - var(--knob-half-h));
+      z-index: 11; /* above frame so knobs sit on top of the recess sockets */
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+      transform-origin: center center;
+    }
+
+    #knob-left  { left: calc(var(--knob-center-left)  - var(--knob-half-w)); }
+    #knob-right { left: calc(var(--knob-center-right) - var(--knob-half-w)); }
+
+    /* ── Shake animation ── */
+    @keyframes device-shake {
+      0%   { transform: translateX(0);    }
+      8%   { transform: translateX(-10px); }
+      18%  { transform: translateX(10px);  }
+      28%  { transform: translateX(-10px); }
+      38%  { transform: translateX(10px);  }
+      48%  { transform: translateX(-8px);  }
+      58%  { transform: translateX(8px);   }
+      68%  { transform: translateX(-6px);  }
+      78%  { transform: translateX(6px);   }
+      90%  { transform: translateX(-3px);  }
+      100% { transform: translateX(0);    }
+    }
+
+    #device.shaking {
+      animation: device-shake 500ms ease-in-out forwards;
+    }
+
+    /* ── Controls ── */
+    #controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-top: 14px;
+      gap: 12px;
+    }
+
+    button {
+      flex: 1;
+      padding: 10px 18px;
+      border: none;
+      border-radius: 8px;
+      background: #e0e0e0;
+      color: #222;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: background 0.12s, transform 0.08s;
+    }
+
+    button:hover  { background: #cacaca; }
+    button:active { background: #b5b5b5; transform: scale(0.97); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="device">
+      <!-- 1 · Texture (lowest) -->
+      <div id="texture-bg"></div>
+
+      <!-- 2 · Drawing canvas -->
+      <canvas id="drawing-canvas" width="560" height="420" tabindex="0"
+              aria-label="Etch-A-Sketch drawing canvas. Use arrow keys to draw."></canvas>
+
+      <!-- 3 · Knobs (behind frame, visible through its transparent holes) -->
+      <img id="knob-left"  src="assets/knob-left.png?v=2"  alt="Left knob  — controls vertical axis">
+      <img id="knob-right" src="assets/knob-right.png?v=2" alt="Right knob — controls horizontal axis">
+
+      <!-- 4 · Frame overlay (top-most; transparent holes reveal canvas & knobs) -->
+      <img id="frame-img" src="assets/frame_2.png" alt="Etch-A-Sketch frame">
+    </div>
+
+    <div id="controls">
+      <button id="btn-shake" type="button">Shake &amp; Clear</button>
+      <button id="btn-save"  type="button">Save Drawing</button>
+    </div>
+  </div>
+
+  <script>
+    /* ─────────────────────────────────────────────
+       Constants
+    ───────────────────────────────────────────── */
+    const CELL = 4;          // px per grid cell (canvas internal coords)
+    const COLS = 140;        // 560 / 4
+    const ROWS = 105;        // 420 / 4
+
+    /* ─────────────────────────────────────────────
+       Element references
+    ───────────────────────────────────────────── */
+    const canvas    = document.getElementById('drawing-canvas');
+    const ctx       = canvas.getContext('2d');
+    const knobLeft  = document.getElementById('knob-left');
+    const knobRight = document.getElementById('knob-right');
+    const device    = document.getElementById('device');
+
+    /* ─────────────────────────────────────────────
+       Canvas setup
+    ───────────────────────────────────────────── */
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#000000';
+
+    /* ─────────────────────────────────────────────
+       State
+    ───────────────────────────────────────────── */
+    let isDrawing      = false;
+    let lastCell       = null;          // { x, y } last drawn grid cell
+    let kbCursor       = { x: 70, y: 52 }; // keyboard cursor, starts at centre
+    let leftKnobAngle  = 0;             // degrees, drives CSS rotate
+    let rightKnobAngle = 0;
+    let shaking        = false;
+
+    /* ─────────────────────────────────────────────
+       Grid helpers
+    ───────────────────────────────────────────── */
+    function clampCell(x, y) {
+      return {
+        x: Math.max(0, Math.min(COLS - 1, x)),
+        y: Math.max(0, Math.min(ROWS - 1, y)),
+      };
+    }
+
+    function clientToCell(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((clientX - rect.left)  / rect.width  * COLS);
+      const y = Math.floor((clientY - rect.top)   / rect.height * ROWS);
+      return clampCell(x, y);
+    }
+
+    function fillCell(x, y) {
+      if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
+      ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+    }
+
+    /* Bresenham's line on the integer grid — prevents gaps on fast moves */
+    function drawLine(x0, y0, x1, y1) {
+      const dx =  Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+      const dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+      let err = dx + dy;
+      for (;;) {
+        fillCell(x0, y0);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+
+    /* ─────────────────────────────────────────────
+       Mouse drawing
+    ───────────────────────────────────────────── */
+    canvas.addEventListener('mousedown', e => {
+      isDrawing = true;
+      const cell = clientToCell(e.clientX, e.clientY);
+      lastCell = cell;
+      fillCell(cell.x, cell.y);
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (!isDrawing) return;
+      const cell = clientToCell(e.clientX, e.clientY);
+      if (lastCell) {
+        const dx = cell.x - lastCell.x;
+        const dy = cell.y - lastCell.y;
+        drawLine(lastCell.x, lastCell.y, cell.x, cell.y);
+        if (dx !== 0) rightKnobAngle += dx * 5;
+        if (dy !== 0) leftKnobAngle  += dy * 5;
+      }
+      lastCell = cell;
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDrawing = false;
+      lastCell  = null;
+    });
+
+    /* Reset lastCell on leave so re-entry doesn't create a jump */
+    canvas.addEventListener('mouseleave', () => {
+      if (isDrawing) lastCell = null;
+    });
+
+    canvas.addEventListener('mouseenter', e => {
+      if (isDrawing) {
+        lastCell = clientToCell(e.clientX, e.clientY);
+      }
+    });
+
+    /* ─────────────────────────────────────────────
+       Keyboard drawing
+    ───────────────────────────────────────────── */
+    const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+
+    document.addEventListener('keydown', e => {
+      const active = document.activeElement;
+      const canvasFocused = active === canvas;
+      const bodyFocused   = active === document.body || active === document.documentElement;
+
+      /* Shake shortcut — works when canvas or body is in focus */
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (canvasFocused || bodyFocused) {
+          e.preventDefault();
+          triggerShake();
+        }
+        return;
+      }
+
+      if (!ARROW_KEYS.has(e.key)) return;
+      if (!canvasFocused && !bodyFocused) return;
+
+      /* Only steal scroll prevention when canvas is explicitly focused */
+      if (canvasFocused) e.preventDefault();
+
+      const prev = { ...kbCursor };
+      switch (e.key) {
+        case 'ArrowLeft':  kbCursor.x = Math.max(0,        kbCursor.x - 1); rightKnobAngle -= 15; break;
+        case 'ArrowRight': kbCursor.x = Math.min(COLS - 1, kbCursor.x + 1); rightKnobAngle += 15; break;
+        case 'ArrowUp':    kbCursor.y = Math.max(0,        kbCursor.y - 1); leftKnobAngle  -= 15; break;
+        case 'ArrowDown':  kbCursor.y = Math.min(ROWS - 1, kbCursor.y + 1); leftKnobAngle  += 15; break;
+      }
+      if (kbCursor.x !== prev.x || kbCursor.y !== prev.y) {
+        fillCell(kbCursor.x, kbCursor.y);
+      }
+    });
+
+    /* ─────────────────────────────────────────────
+       rAF loop — apply knob rotations every frame
+    ───────────────────────────────────────────── */
+    (function knobLoop() {
+      knobLeft.style.transform  = `rotate(${leftKnobAngle}deg)`;
+      knobRight.style.transform = `rotate(${rightKnobAngle}deg)`;
+      requestAnimationFrame(knobLoop);
+    })();
+
+    /* ─────────────────────────────────────────────
+       Shake & Clear
+    ───────────────────────────────────────────── */
+    function triggerShake() {
+      if (shaking) return;
+      shaking = true;
+
+      /* Add CSS shake animation */
+      device.classList.add('shaking');
+
+      /* Record start angles so we can add the full spin on top */
+      const startLeft  = leftKnobAngle;
+      const startRight = rightKnobAngle;
+      const startTime  = performance.now();
+      const DURATION   = 500;
+
+      function step(ts) {
+        const raw     = Math.min((ts - startTime) / DURATION, 1);
+        /* Ease-out cubic for the spin */
+        const eased   = 1 - Math.pow(1 - raw, 3);
+
+        /* Fade out canvas pixels */
+        canvas.style.opacity = String(1 - raw);
+
+        /* Spin knobs 720° each */
+        leftKnobAngle  = startLeft  + 720 * eased;
+        rightKnobAngle = startRight + 720 * eased;
+
+        if (raw < 1) {
+          requestAnimationFrame(step);
+        } else {
+          /* Clear canvas */
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.style.opacity = '1';
+
+          /* Reset keyboard cursor to centre */
+          kbCursor = { x: 70, y: 52 };
+
+          /* Snap both knob indicators back to 12-o'clock (0°) */
+          leftKnobAngle  = 0;
+          rightKnobAngle = 0;
+
+          /* Remove shake class (animation already finished at this point) */
+          device.classList.remove('shaking');
+          shaking = false;
+        }
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    document.getElementById('btn-shake').addEventListener('click', triggerShake);
+
+    /* ─────────────────────────────────────────────
+       Save Drawing
+    ───────────────────────────────────────────── */
+    document.getElementById('btn-save').addEventListener('click', () => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width  = canvas.width;
+      offscreen.height = canvas.height;
+
+      const octx = offscreen.getContext('2d');
+      octx.fillStyle = '#ffffff';
+      octx.fillRect(0, 0, offscreen.width, offscreen.height);
+      octx.drawImage(canvas, 0, 0);
+
+      const link = document.createElement('a');
+      link.href     = offscreen.toDataURL('image/png');
+      link.download = 'my-etch-a-sketch.png';
+      link.click();
+    });
+
+    /* ─────────────────────────────────────────────
+       Responsive scale-to-fit
+       Scales the whole app down when the viewport is
+       smaller than the natural design dimensions so
+       the widget fits in an iframe at 720×600 without
+       scrollbars.
+    ───────────────────────────────────────────── */
+    (function() {
+      const app = document.getElementById('app');
+
+      // Natural design baseline at 720px viewport width:
+      //   device width  = 720 - 32px padding = 688px
+      //   device height = 688 × (1252/1360)  ≈ 633px
+      //   controls row  = 14 (margin) + 44 (buttons) + 20 (padding-bottom) = 78px
+      //   top padding   = 16px
+      //   total height  ≈ 727px
+      const DESIGN_VW = 720;
+      const DESIGN_VH = 727;
+
+      function rescale() {
+        const vw    = window.innerWidth;
+        const vh    = window.innerHeight;
+        const scale = Math.min(vw / DESIGN_VW, vh / DESIGN_VH, 1);
+
+        app.style.transformOrigin = 'top center';
+        app.style.transform       = scale < 0.995 ? `scale(${scale})` : '';
+      }
+
+      window.addEventListener('resize', rescale);
+      rescale();
+    })();
+  </script>
+</body>
+</html>
