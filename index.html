@@ -25,7 +25,7 @@
     #app {
       width: 100%;
       max-width: 720px;
-      padding: 16px 16px 20px;
+      padding: 0 0 12px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -424,37 +424,6 @@
       link.click();
     });
 
-    /* ─────────────────────────────────────────────
-       Responsive scale-to-fit
-       Scales the whole app down when the viewport is
-       smaller than the natural design dimensions so
-       the widget fits in an iframe at 720×600 without
-       scrollbars.
-    ───────────────────────────────────────────── */
-    (function() {
-      const app = document.getElementById('app');
-
-      // Natural design baseline at 720px viewport width:
-      //   device width  = 720 - 32px padding = 688px
-      //   device height = 688 × (1252/1360)  ≈ 633px
-      //   controls row  = 14 (margin) + 44 (buttons) + 20 (padding-bottom) = 78px
-      //   top padding   = 16px
-      //   total height  ≈ 727px
-      const DESIGN_VW = 720;
-      const DESIGN_VH = 727;
-
-      function rescale() {
-        const vw    = window.innerWidth;
-        const vh    = window.innerHeight;
-        const scale = Math.min(vw / DESIGN_VW, vh / DESIGN_VH, 1);
-
-        app.style.transformOrigin = 'top center';
-        app.style.transform       = scale < 0.995 ? `scale(${scale})` : '';
-      }
-
-      window.addEventListener('resize', rescale);
-      rescale();
-    })();
   </script>
 </body>
 </html>
