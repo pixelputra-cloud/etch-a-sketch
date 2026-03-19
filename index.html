@@ -185,8 +185,8 @@
               aria-label="Etch-A-Sketch drawing canvas. Use arrow keys to draw."></canvas>
 
       <!-- 3 · Knobs (behind frame, visible through its transparent holes) -->
-      <img id="knob-left"  src="assets/knob-left.png?v=2"  alt="Left knob  — controls vertical axis">
-      <img id="knob-right" src="assets/knob-right.png?v=2" alt="Right knob — controls horizontal axis">
+      <img id="knob-left"  src="assets/knob-left.png?v=2"  alt="Left knob  — controls horizontal axis">
+      <img id="knob-right" src="assets/knob-right.png?v=2" alt="Right knob — controls vertical axis">
 
       <!-- 4 · Frame overlay (top-most; transparent holes reveal canvas & knobs) -->
       <img id="frame-img" src="assets/frame_2.png" alt="Etch-A-Sketch frame">
@@ -284,8 +284,8 @@
         const dx = cell.x - lastCell.x;
         const dy = cell.y - lastCell.y;
         drawLine(lastCell.x, lastCell.y, cell.x, cell.y);
-        if (dx !== 0) rightKnobAngle += dx * 5;
-        if (dy !== 0) leftKnobAngle  += dy * 5;
+        if (dx !== 0) leftKnobAngle  += dx * 5;
+        if (dy !== 0) rightKnobAngle += dy * 5;
       }
       lastCell = cell;
     });
@@ -333,10 +333,10 @@
 
       const prev = { ...kbCursor };
       switch (e.key) {
-        case 'ArrowLeft':  kbCursor.x = Math.max(0,        kbCursor.x - 1); rightKnobAngle -= 15; break;
-        case 'ArrowRight': kbCursor.x = Math.min(COLS - 1, kbCursor.x + 1); rightKnobAngle += 15; break;
-        case 'ArrowUp':    kbCursor.y = Math.max(0,        kbCursor.y - 1); leftKnobAngle  -= 15; break;
-        case 'ArrowDown':  kbCursor.y = Math.min(ROWS - 1, kbCursor.y + 1); leftKnobAngle  += 15; break;
+        case 'ArrowLeft':  kbCursor.x = Math.max(0,        kbCursor.x - 1); leftKnobAngle  -= 15; break;
+        case 'ArrowRight': kbCursor.x = Math.min(COLS - 1, kbCursor.x + 1); leftKnobAngle  += 15; break;
+        case 'ArrowUp':    kbCursor.y = Math.max(0,        kbCursor.y - 1); rightKnobAngle -= 15; break;
+        case 'ArrowDown':  kbCursor.y = Math.min(ROWS - 1, kbCursor.y + 1); rightKnobAngle += 15; break;
       }
       if (kbCursor.x !== prev.x || kbCursor.y !== prev.y) {
         fillCell(kbCursor.x, kbCursor.y);
