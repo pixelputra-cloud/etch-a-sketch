@@ -124,6 +124,24 @@
     #knob-left  { left: calc(var(--knob-center-left)  - var(--knob-half-w)); }
     #knob-right { left: calc(var(--knob-center-right) - var(--knob-half-w)); }
 
+    /* Knob drag zones — invisible circular hit-areas over each dial */
+    .knob-zone {
+      position: absolute;
+      width:  var(--knob-size);
+      aspect-ratio: 1 / 1;
+      top: calc(var(--knob-center-y) - var(--knob-half-h));
+      border-radius: 50%;
+      z-index: 12;          /* above knob images (11) and frame (10) */
+      cursor: grab;
+      background: transparent;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .knob-zone:active { cursor: grabbing; }
+    #zone-left  { left: calc(var(--knob-center-left)  - var(--knob-half-w)); }
+    #zone-right { left: calc(var(--knob-center-right) - var(--knob-half-w)); }
+
     /* ── Shake animation ── */
     @keyframes device-shake {
       0%   { transform: translateX(0);    }
@@ -167,8 +185,8 @@
     .frame-btn:hover  { opacity: 0.82; }
     .frame-btn:active { transform: translateX(-50%) translateY(-50%) scale(0.92); }
 
-    #btn-shake { left: 40.96%; top: calc(89.86% - 20px); }
-    #btn-save  { left: 59.19%; top: calc(89.86% - 20px); }
+    #btn-shake { left: calc(40.96% + 2.5px); top: calc(89.86% - 10px); }
+    #btn-save  { left: 59.19%; top: calc(89.86% - 10px); }
   </style>
 </head>
 <body>
@@ -184,6 +202,10 @@
       <!-- 3 · Knobs (behind frame, visible through its transparent holes) -->
       <img id="knob-left"  src="assets/knob-left.png?v=2"  alt="Left knob  — controls horizontal axis">
       <img id="knob-right" src="assets/knob-right.png?v=2" alt="Right knob — controls vertical axis">
+
+      <!-- 3b · Knob drag zones — invisible circular overlays that capture drag input -->
+      <div id="zone-left"  class="knob-zone" aria-label="Left dial — drag to draw horizontally"></div>
+      <div id="zone-right" class="knob-zone" aria-label="Right dial — drag to draw vertically"></div>
 
       <!-- 4 · Frame buttons (on top of frame, centred on recess slots) -->
       <button id="btn-shake" class="frame-btn" type="button" aria-label="Shake and clear">
@@ -203,8 +225,8 @@
        Constants
     ───────────────────────────────────────────── */
     const CELL = 4;          // px per grid cell (canvas internal coords)
-    const COLS = 140;        // 560 / 4
-    const ROWS = 105;        // 420 / 4
+    let COLS = 140;          // recalculated on resize
+    let ROWS = 105;
 
     /* ─────────────────────────────────────────────
        Element references
@@ -230,6 +252,25 @@
     let leftKnobAngle  = 0;             // degrees, drives CSS rotate
     let rightKnobAngle = 0;
     let shaking        = false;
+
+    /* ─────────────────────────────────────────────
+       Canvas resize — match internal pixels to CSS display size
+    ───────────────────────────────────────────── */
+    function resizeCanvas() {
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      if (w === 0 || h === 0) return;
+      canvas.width  = Math.floor(w / CELL) * CELL;
+      canvas.height = Math.floor(h / CELL) * CELL;
+      COLS = canvas.width  / CELL;
+      ROWS = canvas.height / CELL;
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = '#000000';
+      kbCursor.x = Math.min(kbCursor.x, COLS - 1);
+      kbCursor.y = Math.min(kbCursor.y, ROWS - 1);
+    }
+    requestAnimationFrame(resizeCanvas);
+    new ResizeObserver(resizeCanvas).observe(canvas);
 
     /* ─────────────────────────────────────────────
        Grid helpers
@@ -339,7 +380,7 @@
         case 'ArrowDown':  kbCursor.y = Math.min(ROWS - 1, kbCursor.y + 1); rightKnobAngle += 15; break;
       }
       if (kbCursor.x !== prev.x || kbCursor.y !== prev.y) {
-        fillCell(kbCursor.x, kbCursor.y);
+        drawLine(prev.x, prev.y, kbCursor.x, kbCursor.y);
       }
     });
 
@@ -350,6 +391,84 @@
       knobLeft.style.transform  = `rotate(${leftKnobAngle}deg)`;
       knobRight.style.transform = `rotate(${rightKnobAngle}deg)`;
       requestAnimationFrame(knobLoop);
+    })();
+
+    /* ─────────────────────────────────────────────
+       Knob drag → draw
+       Dragging a zone rotates the knob and moves the
+       shared kbCursor along its axis, drawing as it goes.
+    ───────────────────────────────────────────── */
+    (function setupKnobDrags() {
+      const SENSITIVITY = 1 / 7;  /* cells per degree; 360° ≈ 51 cells */
+
+      function makeKnobDrag(zone, axis) {
+        let dragging  = false;
+        let lastAngle = null;
+        let zoneRect  = null;
+        let frac      = 0;
+
+        function centerAngle(cx, cy) {
+          const rx = zoneRect.left + zoneRect.width  / 2;
+          const ry = zoneRect.top  + zoneRect.height / 2;
+          return Math.atan2(cy - ry, cx - rx) * 180 / Math.PI;
+        }
+
+        zone.addEventListener('mousedown', e => {
+          dragging  = true;
+          zoneRect  = zone.getBoundingClientRect();
+          lastAngle = centerAngle(e.clientX, e.clientY);
+          frac      = 0;
+          e.preventDefault();
+        });
+
+        zone.addEventListener('touchstart', e => {
+          dragging  = true;
+          zoneRect  = zone.getBoundingClientRect();
+          lastAngle = centerAngle(e.touches[0].clientX, e.touches[0].clientY);
+          frac      = 0;
+          e.preventDefault();
+        }, { passive: false });
+
+        function onMove(cx, cy) {
+          if (!dragging) return;
+          const newAngle = centerAngle(cx, cy);
+          let delta = newAngle - lastAngle;
+          if (delta >  180) delta -= 360;
+          if (delta < -180) delta += 360;
+          lastAngle = newAngle;
+
+          if (axis === 'x') leftKnobAngle  += delta;
+          else              rightKnobAngle += delta;
+
+          frac += delta * SENSITIVITY;
+          const steps = Math.trunc(frac);
+          if (steps === 0) return;
+          frac -= steps;
+
+          const prev = { ...kbCursor };
+          if (axis === 'x') {
+            kbCursor.x = Math.max(0, Math.min(COLS - 1, kbCursor.x + steps));
+          } else {
+            kbCursor.y = Math.max(0, Math.min(ROWS - 1, kbCursor.y + steps));
+          }
+          if (kbCursor.x !== prev.x || kbCursor.y !== prev.y) {
+            drawLine(prev.x, prev.y, kbCursor.x, kbCursor.y);
+          }
+        }
+
+        window.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+        window.addEventListener('touchmove', e => {
+          onMove(e.touches[0].clientX, e.touches[0].clientY);
+          e.preventDefault();
+        }, { passive: false });
+
+        function onEnd() { dragging = false; lastAngle = null; }
+        window.addEventListener('mouseup',  onEnd);
+        window.addEventListener('touchend', onEnd);
+      }
+
+      makeKnobDrag(document.getElementById('zone-left'),  'x');
+      makeKnobDrag(document.getElementById('zone-right'), 'y');
     })();
 
     /* ─────────────────────────────────────────────
