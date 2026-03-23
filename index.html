@@ -25,7 +25,7 @@
     #app {
       width: 100%;
       max-width: 720px;
-      padding: 0 0 12px;
+      padding: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -143,35 +143,32 @@
       animation: device-shake 500ms ease-in-out forwards;
     }
 
-    /* ── Controls ── */
-    #controls {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-      margin-top: 14px;
-      gap: 12px;
-      position: relative;
-      z-index: 20;
-    }
-
-    button {
-      flex: 1;
-      padding: 10px 18px;
+    /* ── Frame buttons (inside device, centred on frame recesses) ── */
+    .frame-btn {
+      position: absolute;
+      width: 9.56%;        /* 130/1360 — scales 1:1 with the frame image */
+      aspect-ratio: 1 / 1;
+      transform: translateX(-50%) translateY(-50%);
+      z-index: 15;
+      background: transparent;
       border: none;
-      border-radius: 8px;
-      background: #e0e0e0;
-      color: #222;
-      font-size: 14px;
-      font-weight: 600;
-      font-family: inherit;
+      padding: 0;
       cursor: pointer;
-      letter-spacing: 0.02em;
-      transition: background 0.12s, transform 0.08s;
+      -webkit-user-drag: none;
+      user-select: none;
+      transition: opacity 0.12s, transform 0.1s;
     }
+    .frame-btn img {
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      -webkit-user-drag: none;
+    }
+    .frame-btn:hover  { opacity: 0.82; }
+    .frame-btn:active { transform: translateX(-50%) translateY(-50%) scale(0.92); }
 
-    button:hover  { background: #cacaca; }
-    button:active { background: #b5b5b5; transform: scale(0.97); }
+    #btn-shake { left: 33.38%; top: 90.57%; }
+    #btn-save  { left: 66.32%; top: 90.49%; }
   </style>
 </head>
 <body>
@@ -188,13 +185,16 @@
       <img id="knob-left"  src="assets/knob-left.png?v=2"  alt="Left knob  — controls horizontal axis">
       <img id="knob-right" src="assets/knob-right.png?v=2" alt="Right knob — controls vertical axis">
 
-      <!-- 4 · Frame overlay (top-most; transparent holes reveal canvas & knobs) -->
-      <img id="frame-img" src="assets/frame_2.png" alt="Etch-A-Sketch frame">
-    </div>
+      <!-- 4 · Frame buttons (on top of frame, centred on recess slots) -->
+      <button id="btn-shake" class="frame-btn" type="button" aria-label="Shake and clear">
+        <img src="assets/Shake and Clear.png" alt="">
+      </button>
+      <button id="btn-save" class="frame-btn" type="button" aria-label="Save drawing">
+        <img src="assets/Save Drawing.png" alt="">
+      </button>
 
-    <div id="controls">
-      <button id="btn-shake" type="button">Shake &amp; Clear</button>
-      <button id="btn-save"  type="button">Save Drawing</button>
+      <!-- 5 · Frame overlay (top-most; transparent holes reveal canvas & knobs) -->
+      <img id="frame-img" src="assets/frame_2.png" alt="Etch-A-Sketch frame">
     </div>
   </div>
 
