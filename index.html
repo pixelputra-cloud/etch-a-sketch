@@ -106,6 +106,31 @@
       border-radius: 4px;
     }
 
+    /* Cursor overlay — exactly mirrors the canvas bounding box */
+    #cursor-overlay {
+      position: absolute;
+      left:   var(--canvas-left);
+      top:    var(--canvas-top);
+      width:  var(--canvas-width);
+      height: var(--canvas-height);
+      z-index: 13;   /* above canvas (11) and knob-zones (12), below buttons (15) */
+      pointer-events: none;
+    }
+
+    #cursor-dot {
+      position: absolute;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+      /* 4 square dots ±6px from cursor centre — no centre dot, clear crosshair gap */
+      box-shadow:
+        0    -6px 0 2px rgba(0, 0, 0, 0.9),
+        0     6px 0 2px rgba(0, 0, 0, 0.9),
+        -6px  0   0 2px rgba(0, 0, 0, 0.9),
+        6px   0   0 2px rgba(0, 0, 0, 0.9);
+      filter: none;
+    }
+
     /* Knob images — proportional to frame (14.71% = 200px at native 1360px),
        centred on their recess socket holes */
     #knob-left,
@@ -185,8 +210,40 @@
     .frame-btn:hover  { opacity: 0.82; }
     .frame-btn:active { transform: translateX(-50%) translateY(-50%) scale(0.92); }
 
-    #btn-shake { left: 41.07%; top: 87.90%; }
-    #btn-save  { left: 59.15%; top: 87.90%; }
+    /* Three buttons — all vertically centred on the same 87.90% line */
+    #btn-shake       { left: 37.00%; top: 87.90%; }
+    #btn-save        { left: 63.22%; top: 87.90%; }
+
+    /* Toggle base: width scaled so height == shake/save height (78px)
+       base natural 92×136 → target h=78px → w = 78×(92/136) = 52.8px = 7.33% of 720 */
+    #draw-toggle-base {
+      position: absolute;
+      width: 7.33%;
+      left: 50.11%;
+      top: 87.90%;          /* same centre as shake/save — top & bottom guide lines align */
+      transform: translateX(-50%) translateY(-50%);
+      z-index: 14;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    /* Toggle button at 86% of base width → 6.30%
+       draw-on  top = base-top + 6px rim → 82.0% + 0.90% + half-btn(3.70%) = 86.60%
+       draw-off top = base-bot - 2px rim - half-btn           = 90.10%        */
+    #btn-draw-toggle {
+      left: 50.11%;
+      top: 86.60%;          /* draw-on: 6px dark cap visible above button */
+      width: 6.30%;
+      transition: top 0.18s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    #btn-draw-toggle.draw-off {
+      top: 90.10%;          /* draw-off: button at base bottom, large dark cap above */
+    }
+    /* The slide is the press feedback — suppress the default scale */
+    #btn-draw-toggle:active {
+      transform: translateX(-50%) translateY(-50%);
+    }
   </style>
 </head>
 <body>
@@ -198,6 +255,9 @@
       <!-- 2 · Drawing canvas -->
       <canvas id="drawing-canvas" width="560" height="420" tabindex="0"
               aria-label="Etch-A-Sketch drawing canvas. Use arrow keys to draw."></canvas>
+
+      <!-- 2b · Cursor dot overlay — sits above canvas, visible in both modes -->
+      <div id="cursor-overlay"><div id="cursor-dot"></div></div>
 
       <!-- 3 · Knobs (behind frame, visible through its transparent holes) -->
       <img id="knob-left"  src="assets/knob-left.png?v=2"  alt="Left knob  — controls horizontal axis">
@@ -211,6 +271,13 @@
       <button id="btn-shake" class="frame-btn" type="button" aria-label="Shake and clear">
         <img src="assets/Shake and Clear.png" alt="">
       </button>
+
+      <!-- Draw toggle: oval base behind button, button on top -->
+      <img id="draw-toggle-base" src="assets/draw-toggle-base.png" alt="">
+      <button id="btn-draw-toggle" class="frame-btn" type="button" aria-label="Toggle draw mode — currently drawing">
+        <img id="draw-toggle-img" src="assets/draw-on.png" alt="">
+      </button>
+
       <button id="btn-save" class="frame-btn" type="button" aria-label="Save drawing">
         <img src="assets/Save Drawing.png" alt="">
       </button>
@@ -236,6 +303,7 @@
     const knobLeft  = document.getElementById('knob-left');
     const knobRight = document.getElementById('knob-right');
     const device    = document.getElementById('device');
+    const cursorDot = document.getElementById('cursor-dot');
 
     /* ─────────────────────────────────────────────
        Canvas setup
@@ -268,9 +336,15 @@
       ctx.fillStyle = '#000000';
       kbCursor.x = Math.min(kbCursor.x, COLS - 1);
       kbCursor.y = Math.min(kbCursor.y, ROWS - 1);
+      updateCursor();
     }
     requestAnimationFrame(resizeCanvas);
     new ResizeObserver(resizeCanvas).observe(canvas);
+
+    function updateCursor() {
+      cursorDot.style.left = ((kbCursor.x + 0.5) / COLS * 100) + '%';
+      cursorDot.style.top  = ((kbCursor.y + 0.5) / ROWS * 100) + '%';
+    }
 
     /* ─────────────────────────────────────────────
        Grid helpers
@@ -315,7 +389,9 @@
       isDrawing = true;
       const cell = clientToCell(e.clientX, e.clientY);
       lastCell = cell;
-      fillCell(cell.x, cell.y);
+      kbCursor = { ...cell };
+      if (drawModeOn) fillCell(cell.x, cell.y);
+      updateCursor();
     });
 
     window.addEventListener('mousemove', e => {
@@ -324,11 +400,13 @@
       if (lastCell) {
         const dx = cell.x - lastCell.x;
         const dy = cell.y - lastCell.y;
-        drawLine(lastCell.x, lastCell.y, cell.x, cell.y);
+        if (drawModeOn) drawLine(lastCell.x, lastCell.y, cell.x, cell.y);
         if (dx !== 0) leftKnobAngle  += dx * 5;
         if (dy !== 0) rightKnobAngle += dy * 5;
       }
       lastCell = cell;
+      kbCursor = { ...cell };
+      updateCursor();
     });
 
     window.addEventListener('mouseup', () => {
@@ -380,7 +458,8 @@
         case 'ArrowDown':  kbCursor.y = Math.min(ROWS - 1, kbCursor.y + 1); rightKnobAngle += 15; break;
       }
       if (kbCursor.x !== prev.x || kbCursor.y !== prev.y) {
-        drawLine(prev.x, prev.y, kbCursor.x, kbCursor.y);
+        if (drawModeOn) drawLine(prev.x, prev.y, kbCursor.x, kbCursor.y);
+        updateCursor();
       }
     });
 
@@ -452,7 +531,8 @@
             kbCursor.y = Math.max(0, Math.min(ROWS - 1, kbCursor.y + steps));
           }
           if (kbCursor.x !== prev.x || kbCursor.y !== prev.y) {
-            drawLine(prev.x, prev.y, kbCursor.x, kbCursor.y);
+            if (drawModeOn) drawLine(prev.x, prev.y, kbCursor.x, kbCursor.y);
+            updateCursor();
           }
         }
 
@@ -507,7 +587,8 @@
           canvas.style.opacity = '1';
 
           /* Reset keyboard cursor to centre */
-          kbCursor = { x: 70, y: 52 };
+          kbCursor = { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) };
+          updateCursor();
 
           /* Snap both knob indicators back to 12-o'clock (0°) */
           leftKnobAngle  = 0;
@@ -523,6 +604,21 @@
     }
 
     document.getElementById('btn-shake').addEventListener('click', triggerShake);
+
+    /* ─────────────────────────────────────────────
+       Draw-mode toggle
+    ───────────────────────────────────────────── */
+    let drawModeOn = true;
+
+    document.getElementById('btn-draw-toggle').addEventListener('click', () => {
+      drawModeOn = !drawModeOn;
+      const btn = document.getElementById('btn-draw-toggle');
+      const img = document.getElementById('draw-toggle-img');
+      img.src = drawModeOn ? 'assets/draw-on.png' : 'assets/draw-off.png';
+      btn.classList.toggle('draw-off', !drawModeOn);
+      btn.setAttribute('aria-label', drawModeOn ? 'Toggle draw mode — currently drawing' : 'Toggle draw mode — currently moving');
+      canvas.style.cursor = drawModeOn ? 'crosshair' : 'default';
+    });
 
     /* ─────────────────────────────────────────────
        Save Drawing
